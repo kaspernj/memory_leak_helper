@@ -1,3 +1,5 @@
+require "monitor"
+
 class Memory_leak_helper
   attr_reader :objects_alive
   
@@ -5,37 +7,74 @@ class Memory_leak_helper
   def initialize
     @objects_alive = {}
     @objects_data = {}
+    @mutex = Monitor.new
   end
   
   #Registers the object in the leak-helper hash.
   def register_object(args)
-    return nil if !@objects_alive
-    
-    obj, caller_arr = args[:obj], args[:caller]
-    obj_id = obj.__id__
-    
-    class_name = obj.class.name
-    callback_str = caller_arr.join("___")
-    
-    #Increase count of object-callback.
-    @objects_alive[class_name] = {} if !@objects_alive.key?(class_name)
-    @objects_alive[class_name][callback_str] = {:count => 0, :callback => caller_arr} if !@objects_alive[class_name].key?(callback_str)
-    @objects_alive[class_name][callback_str][:count] += 1
-    
-    #Spawn some data to help unsetting it again.
-    @objects_data[obj_id] = {:callback_str => callback_str, :class_name => class_name}
-    
-    ObjectSpace.define_finalizer(obj, self.method(:object_finalized))
+    @mutex.synchronize do
+      return nil if !@objects_alive
+      
+      obj, backtrace_arr = args[:obj], args[:caller]
+      obj_id = obj.__id__
+      
+      class_name = obj.class.name
+      backtrace_str = backtrace_arr.join("___")
+      
+      #Increase count of object-callback.
+      @objects_alive[class_name] = {} if !@objects_alive.key?(class_name)
+      @objects_alive[class_name][backtrace_str] = {:count => 0, :backtrace => backtrace_arr} if !@objects_alive[class_name].key?(backtrace_str)
+      @objects_alive[class_name][backtrace_str][:count] += 1
+      
+      #Spawn some data to help unsetting it again.
+      @objects_data[obj_id] = {:backtrace_str => backtrace_str, :class_name => class_name}
+      
+      ObjectSpace.define_finalizer(obj, self.method(:object_finalized))
+    end
   end
   
   #Called when an object is finalized. This helps decrease the object-count of a callback.
   def object_finalized(obj_id)
-    callback_str = @objects_data[obj_id][:callback_str]
-    class_name = @objects_data[obj_id][:class_name]
-    @objects_data.delete(obj_id)
+    @mutex.synchronize do
+      return nil if !@objects_data.key?(obj_id)
+      
+      backtrace_str = @objects_data[obj_id][:backtrace_str]
+      class_name = @objects_data[obj_id][:class_name]
+      @objects_data.delete(obj_id)
+      
+      @objects_alive[class_name][backtrace_str][:count] -= 1
+      @objects_alive[class_name].delete(backtrace_str) if @objects_alive[class_name][backtrace_str][:count] <= 0
+    end
+  end
+  
+  #Returns an array of possible leaks.
+  def possible_leaks(args = nil)
+    if args and args[:minimum]
+      minimum = args[:minimum]
+    else
+      minimum = 40
+    end
     
-    @objects_alive[class_name][callback_str][:count] -= 1
-    @objects_alive[class_name].delete(callback_str) if @objects_alive[class_name][callback_str][:count] <= 0
+    @mutex.synchronize do
+      leaks = []
+      @objects_alive.clone.each do |class_name, backtrace_strs|
+        backtrace_strs.each do |backtrace_str, data|
+          if data[:count] >= minimum
+            leaks << {
+              :classname => class_name,
+              :backtrace => data[:backtrace],
+              :count => data[:count]
+            }
+          end
+        end
+      end
+      
+      leaks.sort! do |ele1, ele2|
+        ele2[:count] <=> ele1[:count]
+      end
+      
+      return leaks
+    end
   end
   
   #Only one instance is needed. Define that as a constant.
