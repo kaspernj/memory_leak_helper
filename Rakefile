@@ -17,8 +17,8 @@ Jeweler::Tasks.new do |gem|
   gem.name = "memory_leak_helper"
   gem.homepage = "http://github.com/kaspernj/memory_leak_helper"
   gem.license = "MIT"
-  gem.summary = %Q{TODO: one-line summary of your gem}
-  gem.description = %Q{TODO: longer description of your gem}
+  gem.summary = %Q{A gem to track memory leaks in Ruby.}
+  gem.description = %Q{A gem to track memory leaks in Ruby by tracking which stacktraces creates objects that never gets unset again.}
   gem.email = "k@spernj.org"
   gem.authors = ["Kasper Johansen"]
   # dependencies defined in Gemfile
